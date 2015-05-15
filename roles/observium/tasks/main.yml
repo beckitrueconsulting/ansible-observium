@@ -1,0 +1,6 @@
+---
+# file: roles/lamp/tasks/main.yml
+
+- include: observium.yml 
+  when: ansible_distribution in [ 'Debian', 'Ubuntu' ]
+  

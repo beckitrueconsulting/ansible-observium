@@ -1,0 +1,14 @@
+---
+- name: common tasks for all servers
+  hosts: all
+  sudo: yes
+  roles:
+  - common
+
+- name: Install observium
+  hosts: all
+  gather_facts: false
+  sudo: yes
+  roles:
+  - observium
+        

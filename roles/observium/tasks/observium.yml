@@ -1,0 +1,113 @@
+---
+# file: roles/lamp/tasks/lamp_debian.yml
+
+- name: Set debconf vars
+  action: raw sudo echo mysql-server mysql-server/root_password password {{ lamp.mysql.root_password }} | sudo /usr/bin/debconf-set-selections
+
+- name: Set debconf vars
+  action: raw sudo echo mysql-server mysql-server/root_password_again password {{ lamp.mysql.root_password }} | sudo /usr/bin/debconf-set-selections
+
+- name: Install webstack and database
+  action: apt pkg={{ item }} state=latest
+  with_items:
+      - apache2
+      - libapache2-mod-php5
+      - mysql-client
+      - mysql-server
+      - php5
+      - php5-cli
+      - php5-common
+      - php5-curl
+      - php5-dev
+      - php5-gd
+      - php5-gmp
+      - php5-mcrypt
+      - php5-memcache
+      - php5-mysql
+      - php5-xsl
+      - php-apc
+      - php-pear
+      - python-mysqldb
+      - php5-snmp
+      - snmp
+      - graphviz
+      - php5-json
+      - subversion
+      - rrdtool
+      - fping
+      - imagemagick
+      - whois
+      - mtr-tiny
+      - nmap
+      - ipmitool
+      
+
+- name: Enable apache2 modules
+  command: a2enmod {{ item }}
+  with_items: lamp.apache.modules
+  notify: restart apache2
+
+- name: Enable php module mcrypt
+  command: php5enmod mcrypt
+
+- name: copy .my.cnf file with root password credentials
+  template: src=root-my-cnf.j2 dest=/root/.my.cnf owner=root mode=0600
+    
+- name: update mysql root password for all root accounts
+  mysql_user: name=root host={{ item }} password={{ lamp.mysql.root_password }} login_user=root login_password={{ lamp.mysql.root_password }} check_implicit_admin=yes
+  with_items:
+      - "{{ ansible_eth0.ipv4.address }}"
+      - 127.0.0.1
+      - ::1
+      - localhost
+
+- name: ensure anonymous users are not in the database
+  mysql_user: name='' host={{ item }} state=absent
+  with_items:
+      - localhost
+      - "{{ ansible_eth0.ipv4.address }}"
+
+- name: remove the test database
+  mysql_db: name=test state=absent
+
+- name: Create Database
+  action: "mysql_db login_user=root login_password={{ lamp.mysql.root_password }} name=observium"
+
+- name: Adds required MySQL users
+  mysql_user: "login_user=root login_password={{ lamp.mysql.root_password }} user={{ item.name }} password={{ item.password }} priv={{ item.privs }}"
+  with_items:  lamp.mysql.users
+  when:  lamp.mysql.users is defined
+
+- name: Configuration file for our site
+  action: template src=001-mysite.j2 dest=/etc/apache2/sites-available/observium.conf
+
+- name: install observium
+  unarchive: src=observium-community-latest.tar.gz dest=/opt/ creates=/opt/observium
+
+- name: copy config.php
+  copy: src=config.php dest=/opt/observium/config.php
+
+- name: create folders
+  file: path=/opt/observium/logs state=directory
+
+- name: create folders
+  file: path=/opt/observium/rrd state=directory owner=www-data group=www-data
+
+- name: install database schema
+#command: /opt/observium/includes/update/update.php executable=/usr/bin/php
+  shell: /usr/bin/php includes/update/update.php chdir=/opt/observium
+
+- name: create initial user
+#command: /opt/observium/adduser.php admin supersecret 10 executable=/usr/bin/php
+  shell: /usr/bin/php adduser.php admin supersecret 10 chdir=/opt/observium
+
+- name: install crontab
+  copy: src=observium.cron dest=/etc/cron.d/observium owner=root mode=644
+
+- name: disable default apache site
+  command: a2dissite 000-default
+  notify: restart apache2
+
+- name: enable observium apache site
+  command: a2ensite observium
+  notify: restart apache2
